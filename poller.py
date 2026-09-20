@@ -104,7 +104,7 @@ def process_upload(job):
 
     import processor
 
-    records = processor.process_file(file_bytes)
+    records = processor.process_file(file_bytes, source_name=input_path)
 
     customer_id = job.get("customer_id")
     if not customer_id:
