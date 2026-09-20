@@ -61,3 +61,6 @@ python3 run_tests.py
 ```
 
 Both scripts are zero-argument and exit nonzero on failure.
+
+Dashboard: https://spendrecon.vokrix.co
+Vercel: spendrecon
