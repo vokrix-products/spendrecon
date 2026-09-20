@@ -230,6 +230,26 @@ def _to_canonical(raw_row, mapping):
     return out
 
 
+def _add_unmapped_columns(details, raw_row, mapping):
+    """Keep columns the alias table doesn't know about.
+
+    The ad/bank paths map through fixed alias tables, so any column
+    without an entry would otherwise be dropped - taking the only
+    identifying value (and therefore the title) with it. Detection only
+    needs one matching header to pick a path, so this is easy to hit.
+    """
+    for raw_key, raw_val in raw_row.items():
+        if raw_key is None:
+            continue
+        nk = _normalize_key(raw_key)
+        if not nk or nk in mapping or nk in details:
+            continue
+        val = _clean(raw_val)
+        if val is not None:
+            details[nk] = val
+    return details
+
+
 _DATE_FIELDS = {
     "transaction_date", "invoice_date", "due_date",
     "billing_period_start", "billing_period_end",
@@ -363,6 +383,7 @@ def _rows_to_records(rows, source_name=None):
             if not details:
                 continue
             seen_ok = True
+            _add_unmapped_columns(details, raw, mapping)
             records.append(_build_record(details, source_name))
         if seen_ok:
             return records
