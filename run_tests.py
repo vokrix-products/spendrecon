@@ -98,10 +98,29 @@ def test_generic_records_contract():
 
 
 def test_generic_title_from_own_fields():
+    # "amount" is a bank alias, so header detection classifies this as a
+    # bank statement even though the identifying column is "reference".
+    # The alias table must not swallow that column.
     recs = process_file(
         b"reference,currency,amount\nACME-77,USD,120.00\n", "ref.csv")
     check("generic title built from own field",
           bool(recs) and "ACME-77" in recs[0]["title"])
+    check("unmapped column preserved in details",
+          bool(recs) and recs[0]["details"].get("reference") == "ACME-77")
+    check("mapped columns still canonical on that path",
+          bool(recs) and recs[0]["details"].get("amount") == 120.00)
+
+
+def test_alias_path_keeps_extra_columns():
+    # Fully-mapped ad invoice plus an unknown column: the canonical
+    # fields must survive and the extra column must not be lost.
+    recs = process_file(
+        b"invoice_number,currency,total_amount,po_reference\n"
+        b"INV-200,USD,99.00,PO-9001\n", "ad-extra.csv")
+    check("extra column does not break ad detection",
+          bool(recs) and recs[0]["title"] == "Invoice INV-200")
+    check("extra column retained",
+          bool(recs) and recs[0]["details"].get("po_reference") == "PO-9001")
 
 
 def test_status_normalization():
@@ -140,6 +159,7 @@ def main():
     test_bank_statement_extraction()
     test_generic_records_contract()
     test_generic_title_from_own_fields()
+    test_alias_path_keeps_extra_columns()
     test_status_normalization()
     test_no_status_outside_contract()
     test_empty_input()
