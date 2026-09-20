@@ -99,6 +99,41 @@ _BANK_SPECIFIC_ALIASES = {
 }
 
 
+# Contract statuses. Anything outside this set violates the record contract.
+ALLOWED_STATUSES = ("unpaid", "credited", "reconciled", "paid", "pending")
+
+_STATUS_ALIASES = {
+    "open": "unpaid",
+    "outstanding": "unpaid",
+    "due": "unpaid",
+    "not_paid": "unpaid",
+    "credit": "credited",
+    "credit_note": "credited",
+    "credit_note_issued": "credited",
+    "matched": "reconciled",
+    "settled": "reconciled",
+    "reconciliation": "reconciled",
+    "closed": "paid",
+    "complete": "paid",
+    "completed": "paid",
+    "extracted": "pending",
+    "processing": "pending",
+    "draft": "pending",
+    "unknown": "pending",
+    "n_a": "pending",
+}
+
+
+# Fields a generic (header-agnostic) record can use to build a real title.
+_GENERIC_TITLE_FIELDS = (
+    "invoice_number", "document_number", "transaction_id", "reference",
+    "reference_number", "reference_no", "external_id", "record_id",
+    "payee", "bank_description", "description",
+    "advertiser_or_client_name", "client_name", "customer_name", "name",
+    "label", "title",
+)
+
+
 def _normalize_key(value):
     value = str(value).strip().lower()
     value = re.sub(r"[^a-z0-9]+", "_", value)
@@ -218,25 +253,85 @@ def _post_process_details(details):
     return details
 
 
+def _normalize_status(value, default="pending"):
+    """Clamp a raw status onto the record contract's allowed set."""
+    if value is None:
+        return default
+    key = _normalize_key(value)
+    if not key:
+        return default
+    if key in ALLOWED_STATUSES:
+        return key
+    return _STATUS_ALIASES.get(key, default)
+
+
+def _source_label(source_name):
+    if not source_name:
+        return None
+    base = str(source_name).strip().rstrip("/")
+    if base.startswith("uploads/"):
+        base = base[len("uploads/"):]
+    base = base.split("/")[-1]
+    return base or None
+
+
+def _generic_title(details, source_name=None):
+    """Build a real title for header-agnostic records.
+
+    Falls back in order: identifying field -> any non-numeric field ->
+    source file name -> last resort.
+    """
+    for field in _GENERIC_TITLE_FIELDS:
+        val = details.get(field)
+        if val is None or str(val).strip() == "":
+            continue
+        val = str(val).strip()
+        if field == "title":
+            return val
+        label = " ".join(p.capitalize() for p in field.split("_"))
+        return "{} {}".format(label, val)
+    for key in sorted(details):
+        if key in _DATE_FIELDS or key in _AMOUNT_FIELDS:
+            continue
+        if key in ("currency", "status", "invoice_status"):
+            continue
+        val = details.get(key)
+        if val is None or str(val).strip() == "":
+            continue
+        return str(val).strip()
+    label = _source_label(source_name)
+    if label:
+        return label
+    return "Unlabeled Record"
+
+
 def _build_record(details, source_name=None):
     details = {k: v for k, v in details.items()
                if v is not None and v != ""}
     details = _post_process_details(details)
     dtype = _detect_doc_type_from_details(details)
     if dtype == "bank_statement":
-        title = details.get("bank_description") or "Bank Transaction"
-        status = "reconciled"
+        title = details.get("bank_description") or _generic_title(
+            details, source_name)
+        status = _normalize_status(
+            details.get("status") or details.get("invoice_status"),
+            "reconciled")
         due_date = details.get("transaction_date")
     elif dtype == "ad_invoice":
         inv = details.get("invoice_number") or details.get("document_number")
-        title = "Invoice {}".format(inv) if inv else "Ad Platform Invoice"
-        status = details.get("invoice_status") or "unpaid"
+        title = "Invoice {}".format(inv) if inv else _generic_title(
+            details, source_name)
+        status = _normalize_status(
+            details.get("invoice_status") or details.get("status"),
+            "unpaid")
         due_date = details.get("due_date")
     else:
-        title = details.get("title") or (
-            source_name or "Extracted Record")
-        status = details.get("status") or "extracted"
+        title = _generic_title(details, source_name)
+        status = _normalize_status(
+            details.get("status") or details.get("invoice_status"),
+            "pending")
         due_date = details.get("due_date")
+    details["status"] = status
     return {
         "title": title,
         "status": status,

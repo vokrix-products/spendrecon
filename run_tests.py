@@ -2,11 +2,12 @@
 
 Run with:  python3 run_tests.py
 
-Covers CSV invoice parsing and bank-statement parsing.
+Covers CSV invoice parsing, bank-statement parsing, and the generic
+header-agnostic path that must still honour the record contract.
 """
 import sys
 
-from processor import process_file
+from processor import ALLOWED_STATUSES, process_file
 
 AD_CSV = (
     "invoice_number,invoice_date,due_date,advertiser_or_client_name,"
@@ -18,6 +19,12 @@ BANK_CSV = (
     "bank_account_name,transaction_date,description,amount,currency,"
     "running_balance\n"
     "Globex Operating,2024-03-15,Card Payment,-2500.50,USD,10000.00\n"
+)
+
+# Unrecognized headers -> generic path (this is what test_1/2/3.csv hit).
+GENERIC_CSV = (
+    "currency,invoice date,due date\n"
+    "USD,2024-03-01,2024-03-31\n"
 )
 
 _passed = 0
@@ -74,6 +81,53 @@ def test_bank_statement_extraction():
               d.get("transaction_date") == "2024-03-15")
 
 
+def test_generic_records_contract():
+    recs = process_file(GENERIC_CSV.encode("utf-8"), "test_1.csv")
+    check("generic csv returns one record", len(recs) == 1)
+    if recs:
+        rec = recs[0]
+        check("generic status is in allowed set",
+              rec["status"] in ALLOWED_STATUSES)
+        check("generic status is pending", rec["status"] == "pending")
+        check("generic title is not the placeholder",
+              rec["title"] != "Extracted Record")
+        check("generic title falls back to source name",
+              rec["title"] == "test_1.csv")
+        check("generic status mirrored into details",
+              rec["details"].get("status") == "pending")
+
+
+def test_generic_title_from_own_fields():
+    recs = process_file(
+        b"reference,currency,amount\nACME-77,USD,120.00\n", "ref.csv")
+    check("generic title built from own field",
+          bool(recs) and "ACME-77" in recs[0]["title"])
+
+
+def test_status_normalization():
+    recs = process_file(
+        b"status,title\nweird_state,Widget Co\n", "statuses.csv")
+    check("unknown status clamped to pending",
+          bool(recs) and recs[0]["status"] == "pending")
+    check("details status matches top-level",
+          bool(recs) and recs[0]["details"].get("status")
+          == recs[0]["status"])
+    recs = process_file(
+        b"status,title\nextracted,Widget Co\n", "statuses.csv")
+    check("legacy 'extracted' status mapped to pending",
+          bool(recs) and recs[0]["status"] == "pending")
+
+
+def test_no_status_outside_contract():
+    for src in (AD_CSV, BANK_CSV, GENERIC_CSV):
+        for rec in process_file(src.encode("utf-8"), "mix.csv"):
+            check("status within contract for {}".format(
+                src.split("\n")[0][:24]),
+                rec["status"] in ALLOWED_STATUSES)
+            check("title is non-empty string",
+                  isinstance(rec["title"], str) and rec["title"].strip())
+
+
 def test_empty_input():
     check("empty bytes returns empty list",
           process_file(b"", "empty.csv") == [])
@@ -84,6 +138,10 @@ def main():
     test_returns_list()
     test_ad_invoice_extraction()
     test_bank_statement_extraction()
+    test_generic_records_contract()
+    test_generic_title_from_own_fields()
+    test_status_normalization()
+    test_no_status_outside_contract()
     test_empty_input()
     print("\n{} passed, {} failed".format(_passed, _failed))
     if _failed:
