@@ -137,6 +137,31 @@ def test_status_normalization():
           bool(recs) and recs[0]["status"] == "pending")
 
 
+def test_invoice_id_used_for_title():
+    # Ad invoices that label the document column "invoice_id" rather
+    # than "invoice_number" must still get a real invoice title.
+    recs = process_file(
+        b"invoice_id,currency,total_amount,due_date\n"
+        b"INV-500,USD,10.00,2024-05-01\n", "inv-id.csv")
+    check("title built from invoice_id",
+          bool(recs) and recs[0]["title"] == "Invoice INV-500")
+    check("invoice_id preserved in details",
+          bool(recs) and recs[0]["details"].get("invoice_id") == "INV-500")
+
+
+def test_invoice_id_preferred_over_transaction_id():
+    # The real test_1.csv shape: the identifying column is invoice_id and
+    # a transaction_id sits beside it. The title must not be the
+    # transaction id.
+    recs = process_file(
+        b"invoice_id,transaction_id,amount,currency\n"
+        b"INV-2024-0871,TXN-884201934,14825.50,EUR\n", "test_1.csv")
+    check("invoice_id preferred over transaction_id",
+          bool(recs) and "INV-2024-0871" in recs[0]["title"])
+    check("title is not the transaction id",
+          bool(recs) and "TXN-884201934" not in recs[0]["title"])
+
+
 def test_no_status_outside_contract():
     for src in (AD_CSV, BANK_CSV, GENERIC_CSV):
         for rec in process_file(src.encode("utf-8"), "mix.csv"):
@@ -161,6 +186,8 @@ def main():
     test_generic_title_from_own_fields()
     test_alias_path_keeps_extra_columns()
     test_status_normalization()
+    test_invoice_id_used_for_title()
+    test_invoice_id_preferred_over_transaction_id()
     test_no_status_outside_contract()
     test_empty_input()
     print("\n{} passed, {} failed".format(_passed, _failed))

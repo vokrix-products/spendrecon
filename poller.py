@@ -51,6 +51,23 @@ def get_pending_jobs():
     return resp.json()
 
 
+def delete_records_for_source(source_file_path):
+    """Drop this product's previous records for one source file.
+
+    Makes reprocessing a file idempotent instead of appending a second
+    set of records. Scoped to PRODUCT_ID because the records table is
+    shared across products.
+    """
+    url = f"{REST_URL}/records"
+    headers = {**SB_HEADERS, "Prefer": "return=minimal"}
+    params = {
+        "product_id": f"eq.{PRODUCT_ID}",
+        "source_file_path": f"eq.{source_file_path}",
+    }
+    resp = requests.delete(url, headers=headers, params=params)
+    resp.raise_for_status()
+
+
 def insert_record(record):
     url = f"{REST_URL}/records"
     headers = {**SB_HEADERS, "Content-Type": "application/json", "Prefer": "return=minimal"}
@@ -109,6 +126,11 @@ def process_upload(job):
     customer_id = job.get("customer_id")
     if not customer_id:
         raise ValueError("customer_id missing on job")
+
+    # Reprocessing a file replaces its records instead of appending.
+    # Skipped when nothing parsed, so a bad parse cannot wipe good rows.
+    if records:
+        delete_records_for_source(input_path)
 
     for r in records:
         record = {
