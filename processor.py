@@ -41,6 +41,7 @@ _AD_MAP = {
     "type": "document_type",
     "invoice_number": "invoice_number",
     "invoice_no": "invoice_number",
+    "invoice_id": "invoice_id",
     "document_number": "document_number",
     "document_no": "document_number",
     "invoice_date": "invoice_date",
@@ -125,10 +126,12 @@ _STATUS_ALIASES = {
 
 
 # Fields a generic (header-agnostic) record can use to build a real title.
+# invoice_id sits ahead of transaction_id: when a file labels the
+# identifying document column "invoice_id", it is the better title.
 _GENERIC_TITLE_FIELDS = (
-    "invoice_number", "document_number", "transaction_id", "reference",
-    "reference_number", "reference_no", "external_id", "record_id",
-    "payee", "bank_description", "description",
+    "invoice_number", "document_number", "invoice_id", "transaction_id",
+    "reference", "reference_number", "reference_no", "external_id",
+    "record_id", "payee", "bank_description", "description",
     "advertiser_or_client_name", "client_name", "customer_name", "name",
     "label", "title",
 )
@@ -338,7 +341,9 @@ def _build_record(details, source_name=None):
             "reconciled")
         due_date = details.get("transaction_date")
     elif dtype == "ad_invoice":
-        inv = details.get("invoice_number") or details.get("document_number")
+        inv = (details.get("invoice_number")
+               or details.get("document_number")
+               or details.get("invoice_id"))
         title = "Invoice {}".format(inv) if inv else _generic_title(
             details, source_name)
         status = _normalize_status(
